@@ -7,7 +7,7 @@ A demo project showing how to integrate Dojah KYC SDK with a Next.js app wrapped
 - Node.js 18+
 - Xcode (for iOS)
 - Android Studio (for Android)
-- CocoaPods (for iOS)
+- CocoaPods (for iOS) # install using `brew install cocoapods`
 
 ## Quick Start
 
@@ -63,13 +63,28 @@ A demo project showing how to integrate Dojah KYC SDK with a Next.js app wrapped
 
    For both platforms, run both commands.
 
-6. **Sync web assets to native projects:**
+6. **Add the necessary permissions for the camera:**
+
+   For iOS (in Info.plist):
+
+   ```xml
+   <key>NSCameraUsageDescription</key>
+   <string>Allow Dojah to access your camera for KYC.</string>
+   ```
+
+   For Android (in AndroidManifest.xml):
+
+   ```xml
+   <uses-permission android:name="android.permission.CAMERA" />
+   ```
+
+7. **Sync web assets to native projects:**
 
    ```bash
    npx cap sync
    ```
 
-7. **Open native project:**
+8. **Open native project:**
 
    For iOS:
 
