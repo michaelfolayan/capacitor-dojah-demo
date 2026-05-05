@@ -145,6 +145,14 @@ A demo project showing how to integrate Dojah KYC SDK with a Next.js app wrapped
    - Capacitor syncs web assets to native projects
    - WebView loads the Next.js app with full native capabilities
 
+
+
+```bash
+npm run build
+npx cap sync
+npx cap open ios   # rebuild and run from Xcode
+```
+
 ## Environment Variables
 
 | Variable                       | Description           |
@@ -182,6 +190,17 @@ npx cap sync
 
 - Ensure Android SDK is configured in Android Studio
 
+**iOS camera freezes during liveness check:**
+
+iOS WKWebView strictly enforces the [Permissions Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/Permissions_Policy) on cross-origin iframes. The Dojah SDK renders its liveness UI inside an iframe, and without explicit `allow="camera; microphone"` attributes, `getUserMedia()` silently fails or the camera stream freezes. The `DojahSdk` component includes a `MutationObserver` that automatically patches these attributes onto the Dojah iframe as soon as it appears in the DOM.
+
+If the camera still freezes:
+
+1. Ensure `NSCameraUsageDescription` is set in `ios/App/App/Info.plist` (see step 6 above).
+2. Run `npx cap sync` after any config change to propagate updates to the native project.
+3. Do **not** set `WKAppBoundDomains` in your `Info.plist` unless you include the Dojah domains — this restricts which domains the WKWebView can load.
+4. Verify that `capacitor.config.ts` includes `server.allowNavigation` entries for `*.dojah.io` and `*.dojah.services`.
+
 **Dojah SDK not loading:**
 
 - Verify your credentials in `.env.local`
@@ -189,6 +208,50 @@ npx cap sync
 
 ---
 
+
+
+
+## iOS Liveness Camera Fix
+
+### Problem
+
+The liveness challenge camera stream works correctly on Android but **freezes on iOS** when running the app as a native Capacitor build.
+
+### Root Cause
+
+The Dojah KYC React SDK (`dojah-kyc-sdk-react`) renders its liveness UI inside a **cross-origin iframe** that calls `getUserMedia()` to access the device camera. iOS WKWebView and Android WebView handle this differently:
+
+- **Android WebView** is permissive — it grants `getUserMedia()` access to cross-origin iframes without requiring an explicit `allow` attribute on the `<iframe>` element.
+- **iOS WKWebView** strictly enforces the [Permissions Policy](https://developer.mozilla.org/en-US/docs/Web/HTTP/Permissions_Policy). Without an explicit `allow="camera; microphone"` attribute on the iframe, `getUserMedia()` either silently fails or the video stream **freezes** after the first frame.
+
+Since the Dojah React SDK creates and manages the iframe internally, the host application has no direct control over the iframe's attributes at creation time.
+
+A secondary issue was that the original Capacitor configuration had no `allowNavigation` entries for Dojah's domains, meaning WKWebView could block or degrade iframe navigation to `*.dojah.io` / `*.dojah.services`.
+
+### What Was Fixed
+
+**1. Iframe Permissions Policy patching (`components/DojahSdk.tsx`)**
+
+A `MutationObserver` watches the DOM for the Dojah iframe and patches it the instant it is inserted — before its content loads and before `getUserMedia()` is called. The following attributes are added:
+
+```
+allow="camera; microphone; fullscreen; autoplay; display-capture; encrypted-media"
+allowfullscreen="true"
+```
+
+This replaced the previous approach which used a polling loop (800ms delay + up to 20 retries at 1-second intervals) that was slow to react and had a cleanup leak where the async loop could continue running after the component unmounted.
+
+**2. Capacitor configuration (`capacitor.config.ts`)**
+
+- Added `server.allowNavigation` for `*.dojah.io` and `*.dojah.services` so WKWebView permits iframe navigation to Dojah's domains.
+- Added `ios.preferredContentMode: "mobile"` to ensure a mobile viewport.
+- Added `ios.limitsNavigationsToAppBoundDomains: false` to prevent iOS 14+ from restricting WebView navigation to app-bound domains.
+
+**3. iOS notch/Dynamic Island layout**
+
+The margin adjustment for the iframe (to avoid the notch/Dynamic Island) is now handled by the same `MutationObserver` and only applied when `Capacitor.getPlatform() === "ios"`, rather than unconditionally.
+
+
 For more details on Capacitor, including plugin usage, native features, and deployment, check out the official documentation:
 
-👉 https://capacitorjs.com/docs
+https://capacitorjs.com/docs

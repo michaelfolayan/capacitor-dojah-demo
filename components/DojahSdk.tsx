@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import Dojah from "dojah-kyc-sdk-react";
+import { Capacitor } from "@capacitor/core";
 
 interface DojahSdkProps {
   shouldRender: boolean;
@@ -17,6 +18,17 @@ interface DojahSdkProps {
   onClose?: (err?: unknown) => void;
 }
 
+// iOS WKWebView requires explicit Permissions Policy on cross-origin iframes
+// for getUserMedia to function. Without these, the camera stream freezes.
+const IFRAME_ALLOW_PERMISSIONS = [
+  "camera",
+  "microphone",
+  "fullscreen",
+  "autoplay",
+  "display-capture",
+  "encrypted-media",
+];
+
 const DojahSdk = ({
   shouldRender,
   setShouldRender,
@@ -30,25 +42,54 @@ const DojahSdk = ({
   const widgetId = process.env.NEXT_PUBLIC_DOJAH_WIDGET_ID || "";
 
   useEffect(() => {
-    if (shouldRender) {
-      const adjustPosition = async () => {
-        // this is because on ios devices with island design, the iframe top is blocked by the island/notch
-        let el: HTMLElement | null = null;
-        let maxCheckCount = 20;
-        while (!el && maxCheckCount > 0) {
-          el = document.querySelector("iframe") as HTMLElement;
-          maxCheckCount--;
-          await new Promise((resolve) => setTimeout(resolve, 1000));
-        }
+    if (!shouldRender) return;
 
-        if (el) {
-          el.style.marginTop = "100px";
-        }
-      };
+    const isIOS = Capacitor.getPlatform() === "ios";
 
-      const timer = setTimeout(adjustPosition, 800);
-      return () => clearTimeout(timer);
-    }
+    const patchIframe = (iframe: HTMLIFrameElement) => {
+      const currentAllow = iframe.getAttribute("allow") || "";
+      const missing = IFRAME_ALLOW_PERMISSIONS.filter(
+        (p) => !currentAllow.includes(p)
+      );
+
+      if (missing.length > 0) {
+        const updated = currentAllow
+          ? `${currentAllow}; ${missing.join("; ")}`
+          : missing.join("; ");
+        iframe.setAttribute("allow", updated);
+      }
+
+      if (!iframe.hasAttribute("allowfullscreen")) {
+        iframe.setAttribute("allowfullscreen", "true");
+      }
+
+      if (isIOS) {
+        iframe.style.marginTop = "100px";
+      }
+    };
+
+    document
+      .querySelectorAll<HTMLIFrameElement>("iframe")
+      .forEach(patchIframe);
+
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of Array.from(mutation.addedNodes)) {
+          if (node instanceof HTMLIFrameElement) {
+            patchIframe(node);
+          }
+          if (node instanceof HTMLElement) {
+            node
+              .querySelectorAll<HTMLIFrameElement>("iframe")
+              .forEach(patchIframe);
+          }
+        }
+      }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    return () => observer.disconnect();
   }, [shouldRender]);
 
   if (!shouldRender || !userData) return null;
